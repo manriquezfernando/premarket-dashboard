@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Pre-Market Dashboard</title>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'IBM Plex Sans', sans-serif;
+      background: #0f0f0f;
+      color: #e8e6e0;
+      min-height: 100vh;
+      padding: 2rem;
+    }
+    .top-bar {
+      display: flex; align-items: flex-start;
+      justify-content: space-between;
+      margin-bottom: 1.5rem; flex-wrap: wrap; gap: 10px;
+    }
+    .title { font-size: 18px; font-weight: 500; letter-spacing: 0.02em; }
+    .subtitle { font-size: 12px; color: #888; margin-top: 4px; font-family: 'IBM Plex Mono', monospace; }
+    .refresh-btn {
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+      padding: 7px 16px; cursor: pointer; border-radius: 4px;
+      background: transparent; border: 1px solid #333; color: #e8e6e0;
+      letter-spacing: 0.08em; text-transform: uppercase; transition: background 0.15s;
+    }
+    .refresh-btn:hover { background: #1a1a1a; }
+    .refresh-btn:disabled { opacity: 0.3; cursor: default; }
+    .status {
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+      color: #666; margin-bottom: 1.5rem; min-height: 15px; letter-spacing: 0.03em;
+    }
+    .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)); gap: 12px; }
+    .card {
+      background: #161616; border: 1px solid #252525;
+      border-radius: 10px; padding: 14px 15px 12px;
+      position: relative; transition: border-color 0.3s;
+    }
+    .card.expanding   { border-color: rgba(29,158,117,0.55); }
+    .card.contracting { border-color: rgba(216,90,48,0.45); }
+    .card.inside      { border-color: rgba(200,170,60,0.45); }
+    .card-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px; }
+    .ticker { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600; letter-spacing: 0.06em; color: #f0ede8; }
+    .company { font-size: 10px; color: #666; margin-top: 2px; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #333; margin-top: 4px; flex-shrink: 0; transition: background 0.3s; }
+    .day-section { margin-bottom: 9px; }
+    .day-label { font-family: 'IBM Plex Mono', monospace; font-size: 9px; letter-spacing: 0.12em; text-transform: uppercase; color: #555; margin-bottom: 5px; }
+    .hl-row { display: flex; justify-content: space-between; }
+    .hl-item { display: flex; flex-direction: column; }
+    .hl-item:last-child { text-align: right; }
+    .hl-lbl { font-size: 9px; color: #555; margin-bottom: 2px; }
+    .hl-val { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 500; }
+    .hi-val { color: #1D9E75; }
+    .lo-val { color: #D85A30; }
+    .range-line {
+      font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+      color: #888; margin-top: 4px;
+    }
+    .divider { height: 1px; background: #222; margin: 10px 0; }
+    .compare-badge {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 10px; padding: 6px 9px; border-radius: 5px;
+      font-family: 'IBM Plex Mono', monospace; font-size: 10px; letter-spacing: 0.03em;
+    }
+    .compare-badge.expanding   { background: rgba(29,158,117,0.1);  color: #1D9E75; }
+    .compare-badge.contracting { background: rgba(216,90,48,0.1);   color: #D85A30; }
+    .compare-badge.inside      { background: rgba(200,170,60,0.1);  color: #c8aa3c; }
+    .compare-badge.loading     { background: #1a1a1a; color: #555; }
+    .badge-label { font-weight: 600; }
+    .badge-diff  { font-size: 9px; opacity: 0.85; }
+    .note { font-size: 10px; color: #444; margin-top: 1.5rem; font-family: 'IBM Plex Mono', monospace; line-height: 1.7; }
+  </style>
+</head>
+<body>
+
+<div class="top-bar">
+  <div>
+    <div class="title">Pre-Market Dashboard</div>
+    <div class="subtitle" id="dateLbl">—</div>
+  </div>
+  <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
+</div>
+
+<div class="status" id="status">Loading...</div>
+<div class="grid" id="grid"></div>
+<div class="note">Data via Polygon.io · Green border = expanding range · Red = contracting · Yellow = inside day</div>
+
+<script>
+  const API_KEY = 'i2WRTI8yHSrFrDkwdjivj4emApU66Hxo';
+
+  const STOCKS = [
+    { t: 'TSLA', n: 'Tesla' },
+    { t: 'NVDA', n: 'NVIDIA' },
+    { t: 'MU',   n: 'Micron' },
+    { t: 'SNDK', n: 'SanDisk' },
+    { t: 'MSFT', n: 'Microsoft' },
+    { t: 'AAPL', n: 'Apple' },
+    { t: 'GOOG', n: 'Alphabet' },
+    { t: 'AMZN', n: 'Amazon' },
+    { t: 'META', n: 'Meta' },
+    { t: 'NFLX', n: 'Netflix' },
+    { t: 'AMD',  n: 'AMD' },
+  ];
+
+  const fmt  = n => (n != null && !isNaN(n) && n !== 0) ? '$' + Number(n).toFixed(2) : '—';
+  const fmtR = n => (n != null && !isNaN(n)) ? '$' + Number(n).toFixed(2) : '—';
+  const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+  function setDate() {
+    const d = new Date();
+    const days = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const mons = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    document.getElementById('dateLbl').textContent =
+      `${days[d.getDay()]} · ${mons[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+  }
+
+  function buildCards() {
+    document.getElementById('grid').innerHTML = STOCKS.map(s => `
+      <div class="card" id="card-${s.t}">
+        <div class="card-header">
+          <div><div class="ticker">${s.t}</div><div class="company">${s.n}</div></div>
+          <div class="dot" id="dot-${s.t}"></div>
+        </div>
+
+        <div class="day-section">
+          <div class="day-label">Yesterday</div>
+          <div class="hl-row">
+            <div class="hl-item"><span class="hl-lbl">High</span><span class="hl-val hi-val" id="d1hi-${s.t}">…</span></div>
+            <div class="hl-item"><span class="hl-lbl">Low</span><span class="hl-val lo-val" id="d1lo-${s.t}">…</span></div>
+          </div>
+          <div class="range-line" id="d1rng-${s.t}">Range: —</div>
+        </div>
+
+        <div class="divider"></div>
+
+        <div class="day-section">
+          <div class="day-label">2 Days Ago</div>
+          <div class="hl-row">
+            <div class="hl-item"><span class="hl-lbl">High</span><span class="hl-val hi-val" id="d2hi-${s.t}">…</span></div>
+            <div class="hl-item"><span class="hl-lbl">Low</span><span class="hl-val lo-val" id="d2lo-${s.t}">…</span></div>
+          </div>
+          <div class="range-line" id="d2rng-${s.t}">Range: —</div>
+        </div>
+
+        <div class="compare-badge loading" id="cmp-${s.t}">
+          <span class="badge-label">Loading...</span><span class="badge-diff"></span>
+        </div>
+      </div>
+    `).join('');
+  }
+
+  async function fetchCandles(ticker, retries = 4) {
+    const to   = new Date();
+    const from = new Date();
+    from.setDate(from.getDate() - 10);
+    const fromStr = from.toISOString().split('T')[0];
+    const toStr   = to.toISOString().split('T')[0];
+    const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=10&apiKey=${API_KEY}`;
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+      const r = await fetch(url);
+      if (r.status === 429) {
+        // Rate limited — wait longer and retry
+        await sleep(20000);
+        continue;
+      }
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const data = await r.json();
+      if (!data.results || data.results.length < 2) throw new Error('Not enough data');
+      const n = data.results.length;
+      return {
+        yesterday:  { high: data.results[n-1].h, low: data.results[n-1].l },
+        twoDaysAgo: { high: data.results[n-2].h, low: data.results[n-2].l },
+      };
+    }
+    throw new Error('Failed after retries');
+  }
+
+  function compareRanges(y, p) {
+    const r1 = y.high - y.low;
+    const r2 = p.high - p.low;
+    const diff = r1 - r2;
+    const pct  = ((Math.abs(diff) / r2) * 100).toFixed(1);
+    const isInside = y.high <= p.high && y.low >= p.low;
+    if (isInside) return { type: 'inside',      label: '— Inside Day',  diff: `${Math.abs(diff).toFixed(2)} narrower` };
+    if (diff > 0)  return { type: 'expanding',  label: '▲ Expanding',   diff: `+$${diff.toFixed(2)} (${pct}%)` };
+    return             { type: 'contracting', label: '▼ Contracting', diff: `-$${Math.abs(diff).toFixed(2)} (${pct}%)` };
+  }
+
+  function applyResult(t, result) {
+    const dot  = document.getElementById('dot-'  + t);
+    const card = document.getElementById('card-' + t);
+    const cmp  = document.getElementById('cmp-'  + t);
+
+    if (result.status === 'ok') {
+      const { yesterday, twoDaysAgo } = result;
+
+      document.getElementById('d1hi-'  + t).textContent = fmt(yesterday.high);
+      document.getElementById('d1lo-'  + t).textContent = fmt(yesterday.low);
+      document.getElementById('d1rng-' + t).textContent = `Range: ${fmtR(yesterday.high - yesterday.low)}`;
+
+      document.getElementById('d2hi-'  + t).textContent = fmt(twoDaysAgo.high);
+      document.getElementById('d2lo-'  + t).textContent = fmt(twoDaysAgo.low);
+      document.getElementById('d2rng-' + t).textContent = `Range: ${fmtR(twoDaysAgo.high - twoDaysAgo.low)}`;
+
+      const comp = compareRanges(yesterday, twoDaysAgo);
+      cmp.className = `compare-badge ${comp.type}`;
+      cmp.innerHTML = `<span class="badge-label">${comp.label}</span><span class="badge-diff">${comp.diff}</span>`;
+      card.className = `card ${comp.type}`;
+      dot.style.background = '#1D9E75';
+    } else {
+      ['d1hi','d1lo','d2hi','d2lo'].forEach(k => {
+        const el = document.getElementById(k + '-' + t);
+        if (el) el.textContent = '—';
+      });
+      ['d1rng','d2rng'].forEach(k => {
+        const el = document.getElementById(k + '-' + t);
+        if (el) el.textContent = 'Range: —';
+      });
+      cmp.className = 'compare-badge loading';
+      cmp.innerHTML = '<span class="badge-label">No data</span><span class="badge-diff"></span>';
+      dot.style.background = '#D85A30';
+    }
+  }
+
+  async function loadAll() {
+    setDate();
+    buildCards();
+    const btn = document.getElementById('refreshBtn');
+    btn.disabled = true;
+    let ok = 0;
+
+    for (let i = 0; i < STOCKS.length; i++) {
+      const s = STOCKS[i];
+      document.getElementById('status').textContent =
+        `Fetching ${s.t}... (${i + 1}/${STOCKS.length})`;
+      try {
+        const data = await fetchCandles(s.t);
+        applyResult(s.t, { status: 'ok', ...data });
+        ok++;
+      } catch(e) {
+        applyResult(s.t, { status: 'error' });
+      }
+      // 2 seconds between each request — safely under Polygon free tier limit
+      if (i < STOCKS.length - 1) await sleep(2000);
+    }
+
+    const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    document.getElementById('status').textContent = `Updated ${time} · ${ok}/${STOCKS.length} loaded`;
+    btn.disabled = false;
+  }
+
+  loadAll();
+</script>
+</body>
+</html>
