@@ -55,10 +55,7 @@
     .hl-val { font-family: 'IBM Plex Mono', monospace; font-size: 14px; font-weight: 500; }
     .hi-val { color: #1D9E75; }
     .lo-val { color: #D85A30; }
-    .range-line {
-      font-family: 'IBM Plex Mono', monospace; font-size: 10px;
-      color: #888; margin-top: 4px;
-    }
+    .range-line { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: #888; margin-top: 4px; }
     .divider { height: 1px; background: #222; margin: 10px 0; }
     .compare-badge {
       display: flex; align-items: center; justify-content: space-between;
@@ -92,17 +89,19 @@
   const API_KEY = 'i2WRTI8yHSrFrDkwdjivj4emApU66Hxo';
 
   const STOCKS = [
-    { t: 'TSLA', n: 'Tesla' },
-    { t: 'NVDA', n: 'NVIDIA' },
-    { t: 'MU',   n: 'Micron' },
-    { t: 'SNDK', n: 'SanDisk' },
-    { t: 'MSFT', n: 'Microsoft' },
-    { t: 'AAPL', n: 'Apple' },
-    { t: 'GOOG', n: 'Alphabet' },
-    { t: 'AMZN', n: 'Amazon' },
-    { t: 'META', n: 'Meta' },
-    { t: 'NFLX', n: 'Netflix' },
-    { t: 'AMD',  n: 'AMD' },
+    { t: 'AAPL',  n: 'Apple' },
+    { t: 'AMD',   n: 'AMD' },
+    { t: 'AMZN',  n: 'Amazon' },
+    { t: 'GOOG',  n: 'Alphabet' },
+    { t: 'META',  n: 'Meta' },
+    { t: 'MSFT',  n: 'Microsoft' },
+    { t: 'MU',    n: 'Micron' },
+    { t: 'NBIS',  n: 'Neurabases' },
+    { t: 'NFLX',  n: 'Netflix' },
+    { t: 'NVDA',  n: 'NVIDIA' },
+    { t: 'QQQ',   n: 'Nasdaq ETF' },
+    { t: 'SNDK',  n: 'SanDisk' },
+    { t: 'TSLA',  n: 'Tesla' },
   ];
 
   const fmt  = n => (n != null && !isNaN(n) && n !== 0) ? '$' + Number(n).toFixed(2) : '—';
@@ -124,7 +123,6 @@
           <div><div class="ticker">${s.t}</div><div class="company">${s.n}</div></div>
           <div class="dot" id="dot-${s.t}"></div>
         </div>
-
         <div class="day-section">
           <div class="day-label">Yesterday</div>
           <div class="hl-row">
@@ -133,9 +131,7 @@
           </div>
           <div class="range-line" id="d1rng-${s.t}">Range: —</div>
         </div>
-
         <div class="divider"></div>
-
         <div class="day-section">
           <div class="day-label">2 Days Ago</div>
           <div class="hl-row">
@@ -144,7 +140,6 @@
           </div>
           <div class="range-line" id="d2rng-${s.t}">Range: —</div>
         </div>
-
         <div class="compare-badge loading" id="cmp-${s.t}">
           <span class="badge-label">Loading...</span><span class="badge-diff"></span>
         </div>
@@ -162,11 +157,7 @@
 
     for (let attempt = 0; attempt < retries; attempt++) {
       const r = await fetch(url);
-      if (r.status === 429) {
-        // Rate limited — wait longer and retry
-        await sleep(20000);
-        continue;
-      }
+      if (r.status === 429) { await sleep(20000); continue; }
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       if (!data.results || data.results.length < 2) throw new Error('Not enough data');
@@ -185,7 +176,7 @@
     const diff = r1 - r2;
     const pct  = ((Math.abs(diff) / r2) * 100).toFixed(1);
     const isInside = y.high <= p.high && y.low >= p.low;
-    if (isInside) return { type: 'inside',      label: '— Inside Day',  diff: `${Math.abs(diff).toFixed(2)} narrower` };
+    if (isInside) return { type: 'inside',      label: '— Inside Day',  diff: `$${Math.abs(diff).toFixed(2)} narrower` };
     if (diff > 0)  return { type: 'expanding',  label: '▲ Expanding',   diff: `+$${diff.toFixed(2)} (${pct}%)` };
     return             { type: 'contracting', label: '▼ Contracting', diff: `-$${Math.abs(diff).toFixed(2)} (${pct}%)` };
   }
@@ -197,15 +188,12 @@
 
     if (result.status === 'ok') {
       const { yesterday, twoDaysAgo } = result;
-
       document.getElementById('d1hi-'  + t).textContent = fmt(yesterday.high);
       document.getElementById('d1lo-'  + t).textContent = fmt(yesterday.low);
       document.getElementById('d1rng-' + t).textContent = `Range: ${fmtR(yesterday.high - yesterday.low)}`;
-
       document.getElementById('d2hi-'  + t).textContent = fmt(twoDaysAgo.high);
       document.getElementById('d2lo-'  + t).textContent = fmt(twoDaysAgo.low);
       document.getElementById('d2rng-' + t).textContent = `Range: ${fmtR(twoDaysAgo.high - twoDaysAgo.low)}`;
-
       const comp = compareRanges(yesterday, twoDaysAgo);
       cmp.className = `compare-badge ${comp.type}`;
       cmp.innerHTML = `<span class="badge-label">${comp.label}</span><span class="badge-diff">${comp.diff}</span>`;
@@ -244,7 +232,6 @@
       } catch(e) {
         applyResult(s.t, { status: 'error' });
       }
-      // 2 seconds between each request — safely under Polygon free tier limit
       if (i < STOCKS.length - 1) await sleep(2000);
     }
 
