@@ -68,6 +68,14 @@
     .compare-badge.loading     { background: #1a1a1a; color: #555; }
     .badge-label { font-weight: 600; }
     .badge-diff  { font-size: 9px; opacity: 0.85; }
+    .atr-row {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 8px; padding: 5px 9px; border-radius: 5px;
+      background: rgba(255,255,255,0.03);
+      font-family: 'IBM Plex Mono', monospace; font-size: 10px;
+    }
+    .atr-lbl { color: #555; letter-spacing: 0.06em; }
+    .atr-val { color: #b8a060; font-weight: 600; }
     .note { font-size: 10px; color: #444; margin-top: 1.5rem; font-family: 'IBM Plex Mono', monospace; line-height: 1.7; }
   </style>
 </head>
@@ -83,7 +91,7 @@
 
 <div class="status" id="status">Loading...</div>
 <div class="grid" id="grid"></div>
-<div class="note">Data via Polygon.io · Green border = expanding range · Red = contracting · Yellow = inside day</div>
+<div class="note">Data via Polygon.io · Green border = expanding range · Red = contracting · Yellow = inside day · ATR = 14-day Average True Range</div>
 
 <script>
   const API_KEY = 'i2WRTI8yHSrFrDkwdjivj4emApU66Hxo';
@@ -143,17 +151,41 @@
         <div class="compare-badge loading" id="cmp-${s.t}">
           <span class="badge-label">Loading...</span><span class="badge-diff"></span>
         </div>
+        <div class="atr-row">
+          <span class="atr-lbl">ATR(14)</span>
+          <span class="atr-val" id="atr-${s.t}">—</span>
+        </div>
       </div>
     `).join('');
+  }
+
+  // Calculate ATR(14) from an array of candles {h, l, c}
+  function calcATR(candles, period = 14) {
+    if (candles.length < period + 1) return null;
+    const trs = [];
+    for (let i = 1; i < candles.length; i++) {
+      const high  = candles[i].h;
+      const low   = candles[i].l;
+      const prev  = candles[i - 1].c;
+      const tr = Math.max(high - low, Math.abs(high - prev), Math.abs(low - prev));
+      trs.push(tr);
+    }
+    // Initial ATR = simple average of first 14 TRs
+    let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
+    // Smooth remaining
+    for (let i = period; i < trs.length; i++) {
+      atr = (atr * (period - 1) + trs[i]) / period;
+    }
+    return atr;
   }
 
   async function fetchCandles(ticker, retries = 4) {
     const to   = new Date();
     const from = new Date();
-    from.setDate(from.getDate() - 10);
+    from.setDate(from.getDate() - 30); // 30 days back to get enough candles for ATR(14)
     const fromStr = from.toISOString().split('T')[0];
     const toStr   = to.toISOString().split('T')[0];
-    const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=10&apiKey=${API_KEY}`;
+    const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=30&apiKey=${API_KEY}`;
 
     for (let attempt = 0; attempt < retries; attempt++) {
       const r = await fetch(url);
@@ -161,10 +193,13 @@
       if (!r.ok) throw new Error('HTTP ' + r.status);
       const data = await r.json();
       if (!data.results || data.results.length < 2) throw new Error('Not enough data');
-      const n = data.results.length;
+      const results = data.results;
+      const n = results.length;
+      const atr = calcATR(results);
       return {
-        yesterday:  { high: data.results[n-1].h, low: data.results[n-1].l },
-        twoDaysAgo: { high: data.results[n-2].h, low: data.results[n-2].l },
+        yesterday:  { high: results[n-1].h, low: results[n-1].l },
+        twoDaysAgo: { high: results[n-2].h, low: results[n-2].l },
+        atr,
       };
     }
     throw new Error('Failed after retries');
@@ -187,13 +222,15 @@
     const cmp  = document.getElementById('cmp-'  + t);
 
     if (result.status === 'ok') {
-      const { yesterday, twoDaysAgo } = result;
+      const { yesterday, twoDaysAgo, atr } = result;
       document.getElementById('d1hi-'  + t).textContent = fmt(yesterday.high);
       document.getElementById('d1lo-'  + t).textContent = fmt(yesterday.low);
       document.getElementById('d1rng-' + t).textContent = `Range: ${fmtR(yesterday.high - yesterday.low)}`;
       document.getElementById('d2hi-'  + t).textContent = fmt(twoDaysAgo.high);
       document.getElementById('d2lo-'  + t).textContent = fmt(twoDaysAgo.low);
       document.getElementById('d2rng-' + t).textContent = `Range: ${fmtR(twoDaysAgo.high - twoDaysAgo.low)}`;
+      document.getElementById('atr-'   + t).textContent = atr != null ? '$' + atr.toFixed(2) : '—';
+
       const comp = compareRanges(yesterday, twoDaysAgo);
       cmp.className = `compare-badge ${comp.type}`;
       cmp.innerHTML = `<span class="badge-label">${comp.label}</span><span class="badge-diff">${comp.diff}</span>`;
@@ -208,6 +245,7 @@
         const el = document.getElementById(k + '-' + t);
         if (el) el.textContent = 'Range: —';
       });
+      document.getElementById('atr-' + t).textContent = '—';
       cmp.className = 'compare-badge loading';
       cmp.innerHTML = '<span class="badge-label">No data</span><span class="badge-diff"></span>';
       dot.style.background = '#D85A30';
