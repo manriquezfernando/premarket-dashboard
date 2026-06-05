@@ -35,4 +35,4 @@ jobs:
           git add latest.csv
           git diff --cached --quiet || git commit -m "Update latest.csv - $(date -u '+%Y-%m-%d %H:%M UTC')"
           git pull --rebase origin main
-          git push
+          git push --force
