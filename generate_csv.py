@@ -37,7 +37,7 @@ def calc_atr(candles, period=14):
         atr = (atr * (period - 1) + trs[i]) / period
     return atr
 
-def fetch_candles(ticker, retries=3):
+def fetch_candles(ticker, retries=5):
     to_date   = datetime.utcnow().strftime('%Y-%m-%d')
     from_date = (datetime.utcnow() - timedelta(days=30)).strftime('%Y-%m-%d')
     url = (
@@ -47,27 +47,28 @@ def fetch_candles(ticker, retries=3):
     )
     for attempt in range(retries):
         try:
-            r = requests.get(url, timeout=10)
+            r = requests.get(url, timeout=15)
             if r.status_code == 429:
-                print(f'{ticker}: rate limited, waiting 20s...')
-                time.sleep(20)
+                wait = 30 * (attempt + 1)  # 30s, 60s, 90s...
+                print(f'{ticker}: rate limited, waiting {wait}s...')
+                time.sleep(wait)
                 continue
             r.raise_for_status()
             data = r.json()
             results = data.get('results', [])
             if len(results) < 2:
+                print(f'{ticker}: not enough data ({len(results)} candles)')
                 return None
             return results
         except Exception as e:
             print(f'{ticker} attempt {attempt+1} failed: {e}')
-            time.sleep(3)
+            time.sleep(5)
     return None
 
 def compare_ranges(y_high, y_low, p_high, p_low):
     r1 = y_high - y_low
     r2 = p_high - p_low
     diff = r1 - r2
-    pct = abs(diff) / r2 * 100 if r2 else 0
     is_inside = y_high <= p_high and y_low >= p_low
     if is_inside:
         return 'Inside Day'
@@ -117,7 +118,7 @@ for ticker, company in STOCKS:
             'ATR(14)': round(atr, 2) if atr else '',
         })
 
-    time.sleep(2)  # respect rate limit
+    time.sleep(13)  # 13s delay = ~5 requests/min, safely under free tier limit
 
 # Write CSV
 fields = [
