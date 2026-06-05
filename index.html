@@ -21,6 +21,7 @@
     }
     .title { font-size: 18px; font-weight: 500; letter-spacing: 0.02em; }
     .subtitle { font-size: 12px; color: #888; margin-top: 4px; font-family: 'IBM Plex Mono', monospace; }
+    .btn-group { display: flex; gap: 8px; align-items: center; }
     .refresh-btn {
       font-family: 'IBM Plex Mono', monospace; font-size: 11px;
       padding: 7px 16px; cursor: pointer; border-radius: 4px;
@@ -29,6 +30,14 @@
     }
     .refresh-btn:hover { background: #1a1a1a; }
     .refresh-btn:disabled { opacity: 0.3; cursor: default; }
+    .csv-btn {
+      font-family: 'IBM Plex Mono', monospace; font-size: 11px;
+      padding: 7px 16px; cursor: pointer; border-radius: 4px;
+      background: transparent; border: 1px solid #1D9E75; color: #1D9E75;
+      letter-spacing: 0.08em; text-transform: uppercase; transition: background 0.15s;
+    }
+    .csv-btn:hover { background: rgba(29,158,117,0.1); }
+    .csv-btn:disabled { opacity: 0.3; cursor: default; }
     .status {
       font-family: 'IBM Plex Mono', monospace; font-size: 11px;
       color: #666; margin-bottom: 1.5rem; min-height: 15px; letter-spacing: 0.03em;
@@ -86,7 +95,10 @@
     <div class="title">Pre-Market Dashboard</div>
     <div class="subtitle" id="dateLbl">—</div>
   </div>
-  <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
+  <div class="btn-group">
+    <button class="csv-btn" id="csvBtn" onclick="downloadCSV()" disabled>⬇ CSV</button>
+    <button class="refresh-btn" id="refreshBtn" onclick="loadAll()">↻ Refresh</button>
+  </div>
 </div>
 
 <div class="status" id="status">Loading...</div>
@@ -114,7 +126,11 @@
 
   const fmt  = n => (n != null && !isNaN(n) && n !== 0) ? '$' + Number(n).toFixed(2) : '—';
   const fmtR = n => (n != null && !isNaN(n)) ? '$' + Number(n).toFixed(2) : '—';
+  const fmtCSV = n => (n != null && !isNaN(n) && n !== 0) ? Number(n).toFixed(2) : '';
   const sleep = ms => new Promise(res => setTimeout(res, ms));
+
+  // Store loaded data for CSV export
+  const stockData = {};
 
   function setDate() {
     const d = new Date();
@@ -159,20 +175,17 @@
     `).join('');
   }
 
-  // Calculate ATR(14) from an array of candles {h, l, c}
   function calcATR(candles, period = 14) {
     if (candles.length < period + 1) return null;
     const trs = [];
     for (let i = 1; i < candles.length; i++) {
-      const high  = candles[i].h;
-      const low   = candles[i].l;
-      const prev  = candles[i - 1].c;
+      const high = candles[i].h;
+      const low  = candles[i].l;
+      const prev = candles[i - 1].c;
       const tr = Math.max(high - low, Math.abs(high - prev), Math.abs(low - prev));
       trs.push(tr);
     }
-    // Initial ATR = simple average of first 14 TRs
     let atr = trs.slice(0, period).reduce((a, b) => a + b, 0) / period;
-    // Smooth remaining
     for (let i = period; i < trs.length; i++) {
       atr = (atr * (period - 1) + trs[i]) / period;
     }
@@ -182,7 +195,7 @@
   async function fetchCandles(ticker, retries = 4) {
     const to   = new Date();
     const from = new Date();
-    from.setDate(from.getDate() - 30); // 30 days back to get enough candles for ATR(14)
+    from.setDate(from.getDate() - 30);
     const fromStr = from.toISOString().split('T')[0];
     const toStr   = to.toISOString().split('T')[0];
     const url = `https://api.polygon.io/v2/aggs/ticker/${ticker}/range/1/day/${fromStr}/${toStr}?adjusted=true&sort=asc&limit=30&apiKey=${API_KEY}`;
@@ -223,6 +236,10 @@
 
     if (result.status === 'ok') {
       const { yesterday, twoDaysAgo, atr } = result;
+
+      // Store for CSV
+      stockData[t] = { yesterday, twoDaysAgo, atr };
+
       document.getElementById('d1hi-'  + t).textContent = fmt(yesterday.high);
       document.getElementById('d1lo-'  + t).textContent = fmt(yesterday.low);
       document.getElementById('d1rng-' + t).textContent = `Range: ${fmtR(yesterday.high - yesterday.low)}`;
@@ -252,11 +269,58 @@
     }
   }
 
+  function downloadCSV() {
+    const today = new Date().toISOString().split('T')[0];
+    const rows = [
+      ['Date', 'Ticker', 'Company',
+       'Yesterday High', 'Yesterday Low', 'Yesterday Range',
+       '2 Days Ago High', '2 Days Ago Low', '2 Days Ago Range',
+       'Range Status', 'ATR(14)']
+    ];
+
+    STOCKS.forEach(s => {
+      const d = stockData[s.t];
+      if (!d) {
+        rows.push([today, s.t, s.n, '', '', '', '', '', '', 'No data', '']);
+        return;
+      }
+      const { yesterday, twoDaysAgo, atr } = d;
+      const comp = compareRanges(yesterday, twoDaysAgo);
+      const statusLabel = comp.type === 'expanding' ? 'Expanding' :
+                          comp.type === 'contracting' ? 'Contracting' : 'Inside Day';
+      rows.push([
+        today,
+        s.t,
+        s.n,
+        fmtCSV(yesterday.high),
+        fmtCSV(yesterday.low),
+        fmtCSV(yesterday.high - yesterday.low),
+        fmtCSV(twoDaysAgo.high),
+        fmtCSV(twoDaysAgo.low),
+        fmtCSV(twoDaysAgo.high - twoDaysAgo.low),
+        statusLabel,
+        atr != null ? atr.toFixed(2) : ''
+      ]);
+    });
+
+    const csv = rows.map(r => r.join(',')).join('\n');
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href     = url;
+    a.download = `premarket_${today}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }
+
   async function loadAll() {
     setDate();
     buildCards();
-    const btn = document.getElementById('refreshBtn');
-    btn.disabled = true;
+    Object.keys(stockData).forEach(k => delete stockData[k]);
+    const btn    = document.getElementById('refreshBtn');
+    const csvBtn = document.getElementById('csvBtn');
+    btn.disabled    = true;
+    csvBtn.disabled = true;
     let ok = 0;
 
     for (let i = 0; i < STOCKS.length; i++) {
@@ -275,7 +339,8 @@
 
     const time = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
     document.getElementById('status').textContent = `Updated ${time} · ${ok}/${STOCKS.length} loaded`;
-    btn.disabled = false;
+    btn.disabled    = false;
+    csvBtn.disabled = false; // Enable CSV button once data is loaded
   }
 
   loadAll();
